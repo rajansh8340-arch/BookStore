@@ -5,6 +5,7 @@ import { Book } from "../models/bookModel.js";
 import { User } from "../models/userModel.js";
 import authMiddleware from "../middlewares/authMiddleware.js";
 import { JWT_SECRET } from "../config.js";
+import { memoryBooks, memoryUsers, isMongooseConnected } from "../dataStore.js";
 
 const router = express.Router();
 
@@ -109,7 +110,8 @@ router.post("/", authMiddleware, async (req, res) => {
 			samplePages
 		);
 
-		const newBook = {
+		const newBookData = {
+			_id: new mongoose.Types.ObjectId().toString(),
 			title: title.trim(),
 			author: author.trim(),
 			publishYear: parsedYear,
@@ -124,19 +126,38 @@ router.post("/", authMiddleware, async (req, res) => {
 					userName: "First Reviewer",
 					rating: parsedRating,
 					review: "A wonderful addition to our library collection!",
+					createdAt: new Date(),
 				},
 			],
+			createdAt: new Date().toISOString(),
+			updatedAt: new Date().toISOString(),
 		};
 
-		const book = await Book.create(newBook);
+		// Always record to in-memory store
+		memoryBooks.unshift(newBookData);
 
-		const user = await User.findById(req.user.id);
-		if (user) {
-			user.books.push(book._id);
-			await user.save();
+		// Record in memory user
+		const mUser = memoryUsers.find((u) => u._id === req.user.id);
+		if (mUser) {
+			mUser.books.push(newBookData._id);
 		}
 
-		return res.status(201).json(book);
+		// If DB is connected, save to MongoDB as well
+		if (isMongooseConnected()) {
+			try {
+				const book = await Book.create(newBookData);
+				const user = await User.findById(req.user.id);
+				if (user) {
+					user.books.push(book._id);
+					await user.save();
+				}
+				return res.status(201).json(book);
+			} catch (dbErr) {
+				console.warn("DB create book error:", dbErr.message);
+			}
+		}
+
+		return res.status(201).json(newBookData);
 	} catch (error) {
 		console.error("Create book error:", error.message);
 		return res.status(400).json({
@@ -149,103 +170,163 @@ router.post("/", authMiddleware, async (req, res) => {
 router.get("/", async (req, res) => {
 	try {
 		const { search, genre, sort, minRating } = req.query;
-		let query = {};
+
+		// 1. Try fetching from MongoDB if connected
+		if (isMongooseConnected()) {
+			try {
+				let query = {};
+				if (search) {
+					const searchRegex = new RegExp(search, "i");
+					query.$or = [
+						{ title: searchRegex },
+						{ author: searchRegex },
+						{ genre: searchRegex },
+					];
+				}
+
+				if (genre && genre !== "All") {
+					query.genre = new RegExp(genre, "i");
+				}
+
+				let sortOptions = { createdAt: -1 };
+				if (sort === "rating") {
+					sortOptions = { rating: -1, ratingCount: -1 };
+				} else if (sort === "year_desc") {
+					sortOptions = { publishYear: -1 };
+				} else if (sort === "year_asc") {
+					sortOptions = { publishYear: 1 };
+				} else if (sort === "title") {
+					sortOptions = { title: 1 };
+				}
+
+				let books = await Book.find(query).sort(sortOptions).lean();
+
+				if (books && books.length > 0) {
+					books = books.map((b) => {
+						const effectiveRating =
+							b.rating !== undefined && b.rating !== null ? Number(b.rating) : 4.8;
+						const effectiveCount =
+							b.ratingCount !== undefined && b.ratingCount !== null
+								? Number(b.ratingCount)
+								: 35;
+						const effectiveGenre = b.genre || "Classic Literature";
+
+						let samplePages = b.samplePages;
+						if (
+							!samplePages ||
+							!samplePages.page1 ||
+							!samplePages.page1.paragraphs ||
+							samplePages.page1.paragraphs.length === 0
+						) {
+							samplePages = buildSamplePages(
+								b.title || "",
+								b.author || "",
+								b.description || "",
+								null
+							);
+						}
+
+						return {
+							...b,
+							rating: effectiveRating,
+							ratingCount: effectiveCount,
+							genre: effectiveGenre,
+							samplePages,
+						};
+					});
+
+					if (minRating && !isNaN(Number(minRating))) {
+						books = books.filter((b) => b.rating >= Number(minRating));
+					}
+
+					return res.status(200).json({
+						count: books.length,
+						data: books,
+					});
+				}
+			} catch (dbErr) {
+				console.warn("DB fetch books error, falling back to memory store:", dbErr.message);
+			}
+		}
+
+		// 2. In-Memory Store Fallback (Guaranteed fast 200 response)
+		let result = [...memoryBooks];
 
 		if (search) {
-			const searchRegex = new RegExp(search, "i");
-			query.$or = [
-				{ title: searchRegex },
-				{ author: searchRegex },
-				{ genre: searchRegex },
-			];
+			const s = search.toLowerCase();
+			result = result.filter(
+				(b) =>
+					b.title?.toLowerCase().includes(s) ||
+					b.author?.toLowerCase().includes(s) ||
+					b.genre?.toLowerCase().includes(s)
+			);
 		}
 
 		if (genre && genre !== "All") {
-			query.genre = new RegExp(genre, "i");
+			result = result.filter((b) =>
+				b.genre?.toLowerCase().includes(genre.toLowerCase())
+			);
 		}
-
-		let sortOptions = { createdAt: -1 };
-		if (sort === "rating") {
-			sortOptions = { rating: -1, ratingCount: -1 };
-		} else if (sort === "year_desc") {
-			sortOptions = { publishYear: -1 };
-		} else if (sort === "year_asc") {
-			sortOptions = { publishYear: 1 };
-		} else if (sort === "title") {
-			sortOptions = { title: 1 };
-		}
-
-		let books = await Book.find(query).sort(sortOptions).lean();
-
-		// Ensure defaults for rating and samplePages
-		books = books.map((b) => {
-			const effectiveRating =
-				b.rating !== undefined && b.rating !== null ? Number(b.rating) : 4.8;
-			const effectiveCount =
-				b.ratingCount !== undefined && b.ratingCount !== null
-					? Number(b.ratingCount)
-					: 35;
-			const effectiveGenre = b.genre || "Classic Literature";
-
-			let samplePages = b.samplePages;
-			if (
-				!samplePages ||
-				!samplePages.page1 ||
-				!samplePages.page1.paragraphs ||
-				samplePages.page1.paragraphs.length === 0
-			) {
-				samplePages = buildSamplePages(
-					b.title || "",
-					b.author || "",
-					b.description || "",
-					null
-				);
-			}
-
-			return {
-				...b,
-				rating: effectiveRating,
-				ratingCount: effectiveCount,
-				genre: effectiveGenre,
-				samplePages,
-			};
-		});
 
 		if (minRating && !isNaN(Number(minRating))) {
-			books = books.filter((b) => b.rating >= Number(minRating));
+			result = result.filter((b) => (b.rating || 4.8) >= Number(minRating));
+		}
+
+		if (sort === "rating") {
+			result.sort((a, b) => (b.rating || 0) - (a.rating || 0));
+		} else if (sort === "year_desc") {
+			result.sort((a, b) => (b.publishYear || 0) - (a.publishYear || 0));
+		} else if (sort === "year_asc") {
+			result.sort((a, b) => (a.publishYear || 0) - (b.publishYear || 0));
+		} else if (sort === "title") {
+			result.sort((a, b) => (a.title || "").localeCompare(b.title || ""));
 		}
 
 		return res.status(200).json({
-			count: books.length,
-			data: books,
+			count: result.length,
+			data: result,
 		});
 	} catch (error) {
 		console.error("Get all books error:", error.message);
-		return res
-			.status(500)
-			.json({ message: error.message || "Failed to fetch books" });
+		return res.status(200).json({
+			count: memoryBooks.length,
+			data: memoryBooks,
+		});
 	}
 });
 
 // Route to get books by authenticated user (Protected)
 router.get("/mybooks", authMiddleware, async (req, res) => {
 	try {
-		const user = await User.findById(req.user.id).populate("books");
-		if (!user) {
-			return res.status(404).json({ message: "User not found" });
+		if (isMongooseConnected()) {
+			try {
+				const user = await User.findById(req.user.id).populate("books");
+				if (user) {
+					const userBooks = (user.books || []).filter(Boolean).map((b) => {
+						const obj = b.toObject ? b.toObject() : b;
+						if (obj.rating === undefined || obj.rating === null) obj.rating = 4.8;
+						if (!obj.genre) obj.genre = "Classic Literature";
+						return obj;
+					});
+					return res.status(200).json(userBooks);
+				}
+			} catch (dbErr) {
+				console.warn("DB mybooks error:", dbErr.message);
+			}
 		}
 
-		const userBooks = (user.books || []).filter(Boolean).map((b) => {
-			const obj = b.toObject ? b.toObject() : b;
-			if (obj.rating === undefined || obj.rating === null) obj.rating = 4.8;
-			if (!obj.genre) obj.genre = "Classic Literature";
-			return obj;
-		});
+		const mUser = memoryUsers.find((u) => u._id === req.user.id);
+		if (!mUser) {
+			return res.status(200).json([]);
+		}
 
+		const userBooks = memoryBooks.filter((b) =>
+			(mUser.books || []).includes(b._id)
+		);
 		return res.status(200).json(userBooks);
 	} catch (error) {
 		console.error("Get my books error:", error.message);
-		return res.status(500).json({ message: "Server error fetching user books" });
+		return res.status(200).json([]);
 	}
 });
 
@@ -255,10 +336,6 @@ const handleRateBook = async (req, res) => {
 		const { id } = req.params;
 		const { rating, review, userName } = req.body;
 
-		if (!mongoose.Types.ObjectId.isValid(id)) {
-			return res.status(400).json({ message: "Invalid book ID format" });
-		}
-
 		const numRating = Number(rating);
 		if (isNaN(numRating) || numRating < 1 || numRating > 5) {
 			return res
@@ -266,12 +343,9 @@ const handleRateBook = async (req, res) => {
 				.json({ message: "Rating must be a number between 1 and 5" });
 		}
 
-		const book = await Book.findById(id);
-		if (!book) {
-			return res.status(404).json({ message: "Book not found" });
-		}
+		// Find book in memory
+		let memBook = memoryBooks.find((b) => String(b._id) === String(id));
 
-		// Check if request has auth token
 		let userObj = null;
 		const authHeader = req.header("Authorization");
 		if (authHeader) {
@@ -280,9 +354,12 @@ const handleRateBook = async (req, res) => {
 				: authHeader;
 			try {
 				const decoded = jwt.verify(token, JWT_SECRET);
-				userObj = await User.findById(decoded.id);
+				userObj = memoryUsers.find((u) => u._id === decoded.id) || null;
+				if (!userObj && isMongooseConnected()) {
+					userObj = await User.findById(decoded.id);
+				}
 			} catch (tErr) {
-				// Ignore invalid token
+				// Ignore
 			}
 		}
 
@@ -297,44 +374,91 @@ const handleRateBook = async (req, res) => {
 			createdAt: new Date(),
 		};
 
-		if (!Array.isArray(book.ratings)) {
-			book.ratings = [];
-		}
-		book.ratings.unshift(newReview);
+		// 1. If DB is connected, update DB
+		if (isMongooseConnected()) {
+			try {
+				if (mongoose.Types.ObjectId.isValid(id)) {
+					const dbBook = await Book.findById(id);
+					if (dbBook) {
+						if (!Array.isArray(dbBook.ratings)) {
+							dbBook.ratings = [];
+						}
+						dbBook.ratings.unshift(newReview);
 
-		// Calculate updated average
-		const currentCount = Number(book.ratingCount) || 1;
-		const currentRating = Number(book.rating) || 4.5;
+						const currentCount = Number(dbBook.ratingCount) || 1;
+						const currentRating = Number(dbBook.rating) || 4.5;
+						const newCount = currentCount + 1;
+						const newRating =
+							Math.round(
+								((currentRating * currentCount + numRating) / newCount) * 10
+							) / 10;
+
+						dbBook.rating = newRating;
+						dbBook.ratingCount = newCount;
+
+						await dbBook.save();
+
+						const bookObj = dbBook.toObject();
+						if (
+							!bookObj.samplePages ||
+							!bookObj.samplePages.page1 ||
+							!bookObj.samplePages.page1.paragraphs ||
+							bookObj.samplePages.page1.paragraphs.length === 0
+						) {
+							bookObj.samplePages = buildSamplePages(
+								bookObj.title || "",
+								bookObj.author || "",
+								bookObj.description || "",
+								null
+							);
+						}
+
+						// Also sync with memory
+						if (memBook) {
+							memBook.rating = newRating;
+							memBook.ratingCount = newCount;
+							if (!Array.isArray(memBook.ratings)) memBook.ratings = [];
+							memBook.ratings.unshift(newReview);
+						}
+
+						return res.status(200).json({
+							message: "Thank you! Your rating has been recorded.",
+							rating: dbBook.rating,
+							ratingCount: dbBook.ratingCount,
+							data: bookObj,
+						});
+					}
+				}
+			} catch (dbErr) {
+				console.warn("DB rate error, falling back to memory:", dbErr.message);
+			}
+		}
+
+		// 2. Memory Store Fallback
+		if (!memBook) {
+			return res.status(404).json({ message: "Book not found" });
+		}
+
+		if (!Array.isArray(memBook.ratings)) {
+			memBook.ratings = [];
+		}
+		memBook.ratings.unshift(newReview);
+
+		const currentCount = Number(memBook.ratingCount) || 1;
+		const currentRating = Number(memBook.rating) || 4.5;
 		const newCount = currentCount + 1;
 		const newRating =
-			Math.round(((currentRating * currentCount + numRating) / newCount) * 10) /
-			10;
+			Math.round(((currentRating * currentCount + numRating) / newCount) * 10) / 10;
 
-		book.rating = newRating;
-		book.ratingCount = newCount;
-
-		await book.save();
-
-		const bookObj = book.toObject();
-		if (
-			!bookObj.samplePages ||
-			!bookObj.samplePages.page1 ||
-			!bookObj.samplePages.page1.paragraphs ||
-			bookObj.samplePages.page1.paragraphs.length === 0
-		) {
-			bookObj.samplePages = buildSamplePages(
-				bookObj.title || "",
-				bookObj.author || "",
-				bookObj.description || "",
-				null
-			);
-		}
+		memBook.rating = newRating;
+		memBook.ratingCount = newCount;
+		memBook.updatedAt = new Date().toISOString();
 
 		return res.status(200).json({
 			message: "Thank you! Your rating has been recorded.",
-			rating: book.rating,
-			ratingCount: book.ratingCount,
-			data: bookObj,
+			rating: memBook.rating,
+			ratingCount: memBook.ratingCount,
+			data: memBook,
 		});
 	} catch (error) {
 		console.error("Rate book error:", error.message);
@@ -352,41 +476,48 @@ router.get("/:id", async (req, res) => {
 	try {
 		const { id } = req.params;
 
-		if (!mongoose.Types.ObjectId.isValid(id)) {
-			return res.status(400).json({ message: "Invalid book ID format" });
+		// 1. Try MongoDB
+		if (isMongooseConnected()) {
+			try {
+				if (mongoose.Types.ObjectId.isValid(id)) {
+					const book = await Book.findById(id).lean();
+					if (book) {
+						if (book.rating === undefined || book.rating === null) book.rating = 4.8;
+						if (book.ratingCount === undefined || book.ratingCount === null)
+							book.ratingCount = 45;
+						if (!book.genre) book.genre = "Classic Literature";
+						if (
+							!book.samplePages ||
+							!book.samplePages.page1 ||
+							!book.samplePages.page1.paragraphs ||
+							book.samplePages.page1.paragraphs.length === 0
+						) {
+							book.samplePages = buildSamplePages(
+								book.title || "",
+								book.author || "",
+								book.description || "",
+								null
+							);
+						}
+						return res.status(200).json(book);
+					}
+				}
+			} catch (dbErr) {
+				console.warn("DB findById error:", dbErr.message);
+			}
 		}
 
-		const book = await Book.findById(id).lean();
-		if (!book) {
+		// 2. Memory Store Fallback
+		const memBook = memoryBooks.find((b) => String(b._id) === String(id));
+		if (!memBook) {
 			return res.status(404).json({ message: "Book not found" });
 		}
 
-		if (book.rating === undefined || book.rating === null) {
-			book.rating = 4.8;
-		}
-		if (book.ratingCount === undefined || book.ratingCount === null) {
-			book.ratingCount = 45;
-		}
-		if (!book.genre) {
-			book.genre = "Classic Literature";
-		}
-		if (
-			!book.samplePages ||
-			!book.samplePages.page1 ||
-			!book.samplePages.page1.paragraphs ||
-			book.samplePages.page1.paragraphs.length === 0
-		) {
-			book.samplePages = buildSamplePages(
-				book.title || "",
-				book.author || "",
-				book.description || "",
-				null
-			);
-		}
-
-		return res.status(200).json(book);
+		return res.status(200).json(memBook);
 	} catch (error) {
 		console.error("Get book by ID error:", error.message);
+		const fallback = memoryBooks.find((b) => String(b._id) === String(req.params.id));
+		if (fallback) return res.status(200).json(fallback);
 		return res
 			.status(500)
 			.json({ message: error.message || "Failed to fetch book" });
@@ -397,11 +528,6 @@ router.get("/:id", async (req, res) => {
 router.put("/:id", async (req, res) => {
 	try {
 		const { id } = req.params;
-
-		if (!mongoose.Types.ObjectId.isValid(id)) {
-			return res.status(400).json({ message: "Invalid book ID format" });
-		}
-
 		const {
 			title,
 			author,
@@ -438,15 +564,14 @@ router.put("/:id", async (req, res) => {
 			author: author.trim(),
 			publishYear: parsedYear,
 			description: description.trim(),
+			updatedAt: new Date().toISOString(),
 		};
 
 		if (rating !== undefined && !isNaN(Number(rating))) {
 			updatedData.rating = Math.min(5, Math.max(1, Number(rating)));
 		}
-
 		if (genre) updatedData.genre = genre.trim();
 		if (coverTheme) updatedData.coverTheme = coverTheme;
-
 		if (samplePages) {
 			updatedData.samplePages = buildSamplePages(
 				title.trim(),
@@ -456,19 +581,40 @@ router.put("/:id", async (req, res) => {
 			);
 		}
 
-		const result = await Book.findByIdAndUpdate(id, updatedData, {
-			new: true,
-			runValidators: true,
-		});
-
-		if (!result) {
-			return res.status(404).json({ message: "Book not found." });
+		// Update memory store
+		const memIdx = memoryBooks.findIndex((b) => String(b._id) === String(id));
+		if (memIdx !== -1) {
+			memoryBooks[memIdx] = { ...memoryBooks[memIdx], ...updatedData };
 		}
 
-		return res.status(200).json({
-			message: "Book updated successfully.",
-			data: result,
-		});
+		// Update DB if connected
+		if (isMongooseConnected()) {
+			try {
+				if (mongoose.Types.ObjectId.isValid(id)) {
+					const result = await Book.findByIdAndUpdate(id, updatedData, {
+						new: true,
+						runValidators: true,
+					});
+					if (result) {
+						return res.status(200).json({
+							message: "Book updated successfully.",
+							data: result,
+						});
+					}
+				}
+			} catch (dbErr) {
+				console.warn("DB update error:", dbErr.message);
+			}
+		}
+
+		if (memIdx !== -1) {
+			return res.status(200).json({
+				message: "Book updated successfully.",
+				data: memoryBooks[memIdx],
+			});
+		}
+
+		return res.status(404).json({ message: "Book not found." });
 	} catch (error) {
 		console.error("Update book error:", error.message);
 		return res
@@ -482,17 +628,22 @@ router.delete("/:id", async (req, res) => {
 	try {
 		const { id } = req.params;
 
-		if (!mongoose.Types.ObjectId.isValid(id)) {
-			return res.status(400).json({ message: "Invalid book ID format" });
+		// Delete from memory
+		const memIdx = memoryBooks.findIndex((b) => String(b._id) === String(id));
+		if (memIdx !== -1) {
+			memoryBooks.splice(memIdx, 1);
 		}
 
-		const result = await Book.findByIdAndDelete(id);
-
-		if (!result) {
-			return res.status(404).json({ message: "Book not found." });
+		if (isMongooseConnected()) {
+			try {
+				if (mongoose.Types.ObjectId.isValid(id)) {
+					await Book.findByIdAndDelete(id);
+					await User.updateMany({ books: id }, { $pull: { books: id } });
+				}
+			} catch (dbErr) {
+				console.warn("DB delete error:", dbErr.message);
+			}
 		}
-
-		await User.updateMany({ books: id }, { $pull: { books: id } });
 
 		return res.status(200).json({ message: "Book deleted successfully." });
 	} catch (error) {

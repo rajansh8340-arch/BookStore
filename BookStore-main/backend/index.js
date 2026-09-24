@@ -10,6 +10,9 @@ import booksSeed from "./seedBooks.js";
 
 dotenv.config();
 
+// Disable Mongoose command buffering so queries fail-fast to memory fallback instead of hanging
+mongoose.set("bufferCommands", false);
+
 const app = express();
 
 // Middleware for handling CORS policy
@@ -92,6 +95,7 @@ app.get("/", (req, res) => {
 	return res.status(200).json({
 		status: "success",
 		message: "Welcome to Book Store API",
+		database: mongoose.connection.readyState === 1 ? "connected" : "in-memory-fallback",
 	});
 });
 
@@ -129,26 +133,17 @@ async function seedDatabaseIfEmpty() {
 					}
 				);
 			}
-			await Book.updateMany(
-				{ rating: { $exists: false } },
-				{
-					$set: {
-						rating: 4.8,
-						ratingCount: 25,
-						genre: "Classic Literature",
-						coverTheme: "ocean",
-					},
-				}
-			);
 			console.log("Updated sample pages and ratings for all books in database.");
 		}
 	} catch (seedErr) {
-		console.warn("Could not seed or update initial books:", seedErr.message);
+		console.warn("Could not seed initial books:", seedErr.message);
 	}
 }
 
-async function startServer() {
-	let connected = false;
+// Database Connection Manager
+let isConnected = false;
+async function connectToDatabase() {
+	if (isConnected || mongoose.connection.readyState === 1) return true;
 
 	if (
 		mongoDBURL &&
@@ -157,34 +152,44 @@ async function startServer() {
 	) {
 		try {
 			console.log("Connecting to configured MongoDB database...");
-			await mongoose.connect(mongoDBURL, { serverSelectionTimeoutMS: 5000 });
+			await mongoose.connect(mongoDBURL, {
+				serverSelectionTimeoutMS: 3000,
+				bufferCommands: false,
+			});
 			console.log("Connected to configured MongoDB successfully.");
-			connected = true;
+			isConnected = true;
+			await seedDatabaseIfEmpty();
+			return true;
 		} catch (error) {
 			console.warn("Configured MongoDB connection failed:", error.message);
 		}
 	}
 
-	if (!connected) {
+	// Try in-memory MongoDB if not on serverless/production
+	if (!isConnected && !process.env.VERCEL) {
 		try {
 			console.log("Initializing in-memory MongoDB server for instant setup...");
 			const { MongoMemoryServer } = await import("mongodb-memory-server");
 			const mongod = await MongoMemoryServer.create();
 			const uri = mongod.getUri();
-			await mongoose.connect(uri);
+			await mongoose.connect(uri, { bufferCommands: false });
 			console.log("Connected to in-memory MongoDB successfully!");
-			connected = true;
+			isConnected = true;
+			await seedDatabaseIfEmpty();
+			return true;
 		} catch (memErr) {
-			console.error("In-memory MongoDB startup error:", memErr.message);
+			console.warn("In-memory MongoDB startup skipped:", memErr.message);
 		}
 	}
 
-	if (connected) {
-		await seedDatabaseIfEmpty();
-	} else {
-		console.warn("Database connection pending. Operations requiring database will buffer/fail.");
-	}
+	return false;
+}
 
+// Attempt initial connection asynchronously
+connectToDatabase();
+
+// Only listen on port if not running in a Vercel serverless environment
+if (!process.env.VERCEL) {
 	const server = app.listen(PORT, () => {
 		console.log(`Server running at port: ${PORT}`);
 	});
@@ -198,4 +203,4 @@ async function startServer() {
 	});
 }
 
-startServer();
+export default app;
