@@ -1,77 +1,112 @@
 import { AiOutlineClose } from "react-icons/ai";
-import { PiBookOpenTextLight } from "react-icons/pi";
-import { BiUserCircle } from "react-icons/bi";
+import { PiBookOpenTextLight, PiBookBookmarkFill } from "react-icons/pi";
+import { BiUserCircle, BiCalendar } from "react-icons/bi";
+import RatingStars from "../RatingStars";
 
-const BookModal = ({ book, onClose }) => {
-	function generateCustomId(objectId) {
-		if (objectId.length < 8) {
-			return objectId.split("").reverse().join("");
-		}
-		const last4 = objectId.slice(-4);
-		const next4AfterFirst4 = objectId.slice(4, 8);
-		return `${next4AfterFirst4}${last4}`.toUpperCase();
-	}
+const BookModal = ({ book, onClose, onOpenReader }) => {
+	if (!book) return null;
 
-	const bookId = generateCustomId(book._id);
+	const formatId = (id) => {
+		if (!id || typeof id !== "string") return "";
+		return id.length >= 8 ? id.slice(-8).toUpperCase() : id.toUpperCase();
+	};
+
+	const displayId = formatId(book._id);
 
 	return (
-		// <div
-		// 	className="fixed bg-black bg-opacity-60 top-0 left-0 right-0 bottom-0 z-50 flex justify-center items-center"
-		// 	onClick={onClose}
-		// >
-		// 	<div
-		// 		onClick={(event) => event.stopPropagation()}
-		// 		className="w-[600px] max-w-full h-[400px] bg-white rounded-xl p-4 flex flex-col relative"
-		// 	>
-		// 		<AiOutlineClose
-		// 			className="absolute right-6 top-6 text-3xl text-red-600 cursor-pointer"
-		// 			onClick={onClose}
-		// 		/>
-		// 		<h2 className="w-fit px-4 py-1 bg-red-300 rounded-lg">
-		// 			{book.publishYear}
-		// 		</h2>
-		// 		<h4 className="my-2 text-gray-500">{bookId}</h4>
-		// 		<div className="flex justify-start items-center gap-x-2">
-		// 			<PiBookOpenTextLight className="text-red-300 text-2xl" />
-		// 			<h2 className="my-1">{book.title}</h2>
-		// 		</div>
-		// 		<div className="flex justify-start items-center gap-x-2">
-		// 			<BiUserCircle className="text-red-300 text-2xl" />
-		// 			<h2 className="my-1">{book.author}</h2>
-		// 		</div>
-		// 		<p className="mt-4">Description</p>
-		// 		<p className="my-2">{book.description}</p>
-		// 	</div>
-		// </div>
 		<div
-			className="fixed inset-0 bg-black bg-opacity-60 z-50 flex justify-center items-center"
+			className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex justify-center items-center p-4 animate-in fade-in duration-200"
 			onClick={onClose}
 		>
 			<div
 				onClick={(event) => event.stopPropagation()}
-				className="w-full max-w-4xl h-auto bg-white rounded-lg p-6 flex flex-col relative shadow-lg"
+				className="w-full max-w-2xl bg-white rounded-3xl p-6 sm:p-8 flex flex-col relative shadow-2xl border border-gray-100"
 			>
-				<AiOutlineClose
-					className="absolute top-4 right-4 text-2xl text-red-600 cursor-pointer"
+				<button
+					type="button"
+					aria-label="Close modal"
+					className="absolute top-5 right-5 p-2 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded-full transition-colors"
 					onClick={onClose}
-				/>
-				<div className="flex items-center justify-between mb-4 mt-2 mr-4">
-					<h2 className="text-xl font-bold bg-red-300 text-white px-3 py-1 rounded-lg">
-						{book.publishYear}
-					</h2>
-					<h4 className="text-gray-500 text-lg">{bookId}</h4>
+				>
+					<AiOutlineClose className="text-xl" />
+				</button>
+
+				{/* Badges Bar */}
+				<div className="flex flex-wrap items-center justify-between gap-2 mb-4 pr-10">
+					<div className="flex items-center gap-2">
+						<span className="inline-flex items-center gap-1.5 bg-sky-100 text-sky-800 text-xs font-semibold px-3 py-1 rounded-full">
+							<BiCalendar className="text-sm" />
+							{book.publishYear}
+						</span>
+						<span className="bg-slate-100 text-slate-700 text-xs font-semibold px-3 py-1 rounded-full">
+							{book.genre || "Classic Literature"}
+						</span>
+					</div>
+
+					{displayId && (
+						<span className="text-xs font-mono text-gray-400 bg-gray-100 px-2.5 py-1 rounded-md">
+							#{displayId}
+						</span>
+					)}
 				</div>
-				<div className="flex items-center gap-4 mb-4">
-					<PiBookOpenTextLight className="text-red-300 text-3xl" />
-					<h2 className="text-2xl font-semibold">{book.title}</h2>
+
+				{/* Title and Author */}
+				<div className="flex items-start gap-3 mb-2">
+					<PiBookOpenTextLight className="text-sky-600 text-3xl flex-shrink-0 mt-0.5" />
+					<div>
+						<h2 className="text-2xl font-extrabold text-gray-900 leading-snug font-display">
+							{book.title}
+						</h2>
+						<div className="flex items-center gap-2 text-gray-600 mt-1">
+							<BiUserCircle className="text-sky-600 text-lg" />
+							<span className="text-sm font-medium">by {book.author}</span>
+						</div>
+					</div>
 				</div>
-				<div className="flex items-center gap-4 mb-4">
-					<BiUserCircle className="text-red-300 text-3xl" />
-					<h2 className="text-xl">{book.author}</h2>
+
+				{/* Rating Display */}
+				<div className="my-3 p-3 bg-amber-50/70 rounded-2xl border border-amber-100 flex items-center justify-between">
+					<div className="flex items-center gap-2">
+						<RatingStars
+							rating={book.rating || 4.5}
+							ratingCount={book.ratingCount || 1}
+							showCount={true}
+							showScore={true}
+							size="sm"
+						/>
+					</div>
+					<span className="text-xs font-bold text-amber-900 bg-amber-200/60 px-2.5 py-1 rounded-lg">
+						{book.rating >= 4.5 ? "Top Rated ★" : "Popular Choice"}
+					</span>
 				</div>
-				<div>
-					<p className="text-lg font-semibold mb-2">Description</p>
-					<p className="text-gray-700">{book.description}</p>
+
+				{/* Synopsis */}
+				<div className="border-t border-gray-100 pt-4 mb-5">
+					<h3 className="text-xs font-bold text-gray-700 uppercase tracking-wider mb-2">
+						Synopsis
+					</h3>
+					<p className="text-gray-700 text-sm sm:text-base leading-relaxed max-h-48 overflow-y-auto pr-2">
+						{book.description || "No description provided."}
+					</p>
+				</div>
+
+				{/* CTA to open 2-Page Book Reader */}
+				<div className="flex gap-3 pt-2 border-t border-gray-100">
+					<button
+						type="button"
+						onClick={onClose}
+						className="w-1/3 py-2.5 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-xl text-sm font-semibold transition-colors"
+					>
+						Close
+					</button>
+					<button
+						type="button"
+						onClick={onOpenReader}
+						className="w-2/3 py-2.5 bg-gradient-to-r from-sky-600 to-indigo-600 hover:from-sky-700 hover:to-indigo-700 text-white rounded-xl text-sm font-bold shadow-md hover:shadow-lg transition-all flex items-center justify-center gap-2"
+					>
+						<PiBookBookmarkFill className="text-amber-300 text-lg" />
+						<span>Open 2-Page Book Preview</span>
+					</button>
 				</div>
 			</div>
 		</div>

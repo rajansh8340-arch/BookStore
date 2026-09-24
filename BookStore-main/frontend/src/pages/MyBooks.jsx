@@ -1,89 +1,175 @@
-import React, { useState, useEffect } from "react";
-import axios from "axios";
+import { useState, useEffect } from "react";
+import apiClient from "../api/apiClient";
 import { useSnackbar } from "notistack";
 import { MdOutlineAddBox } from "react-icons/md";
+import { BsTable, BsGrid, BsBookmarks } from "react-icons/bs";
 import BooksCard from "../components/home/BooksCard";
-import { useNavigate } from "react-router-dom";
+import BooksTable from "../components/home/BooksTable";
+import Spinner from "../components/Spinner";
+import { useNavigate, Link } from "react-router-dom";
+import { useAuth } from "../context/AuthContext";
 
 const MyBooks = () => {
 	const [books, setBooks] = useState([]);
+	const [loading, setLoading] = useState(true);
+	const [showType, setShowType] = useState("card");
 	const { enqueueSnackbar } = useSnackbar();
-	const token = localStorage.getItem("token");
-
+	const { user, isAuthenticated } = useAuth();
 	const navigate = useNavigate();
 
-	useEffect(() => {
-		const fetchBooks = async () => {
-			try {
-				const response = await axios.get(
-					"https://bookstore-csp3.onrender.com/books/mybooks",
-					{
-						headers: {
-							Authorization: `Bearer ${token}`,
-						},
-					}
-				);
-				setBooks(response.data);
-			} catch (error) {
-				console.log(error);
-				enqueueSnackbar("Error fetching books", { variant: "error" });
-			}
-		};
-
-		if (token) {
-			fetchBooks();
-		} else {
-			enqueueSnackbar("You need to log in to see your books", {
-				variant: "warning",
-			});
+	const fetchUserBooks = () => {
+		if (!isAuthenticated) {
+			setLoading(false);
+			return;
 		}
-	}, [token, enqueueSnackbar]);
 
-	const handleCreateBookClick = () => {
-		navigate("/books/create");
+		setLoading(true);
+		apiClient
+			.get("/books/mybooks")
+			.then((response) => {
+				const data = Array.isArray(response.data)
+					? response.data
+					: response.data?.data || [];
+				setBooks(data);
+				setLoading(false);
+			})
+			.catch((error) => {
+				console.error("Fetch user books error:", error);
+				if (error.response?.status === 404) {
+					setBooks([]);
+				} else {
+					enqueueSnackbar(
+						error.userMessage || "Error fetching your books.",
+						{ variant: "error" }
+					);
+				}
+				setLoading(false);
+			});
 	};
 
-	return (
-		<div className="p-4">
-			<div className="relative flex justify-center items-center">
-				<h1 className="text-3xl my-4 font-semibold">My Books</h1>
-				<div
-					onClick={handleCreateBookClick}
-					className="absolute right-0 bottom-[-24px] cursor-pointer"
+	useEffect(() => {
+		fetchUserBooks();
+	}, [isAuthenticated]);
+
+	const handleBookUpdated = (updatedBook) => {
+		if (!updatedBook || !updatedBook._id) return;
+		setBooks((prev) =>
+			prev.map((b) => (b._id === updatedBook._id ? { ...b, ...updatedBook } : b))
+		);
+	};
+
+	if (!isAuthenticated) {
+		return (
+			<div className="max-w-md mx-auto my-16 p-8 bg-white rounded-3xl shadow-xl border border-gray-100 text-center">
+				<div className="w-16 h-16 bg-sky-50 text-sky-600 rounded-2xl flex items-center justify-center mx-auto mb-4 text-3xl">
+					<BsBookmarks />
+				</div>
+				<h2 className="text-2xl font-extrabold text-gray-900 mb-2 font-display">
+					Sign In Required
+				</h2>
+				<p className="text-sm text-gray-500 mb-6">
+					Please log in to view and manage books added by you.
+				</p>
+				<Link
+					to="/login"
+					className="inline-block bg-sky-600 hover:bg-sky-700 text-white font-bold px-6 py-2.5 rounded-2xl shadow-md transition-all"
 				>
-					<MdOutlineAddBox className="text-sky-800 text-4xl" />
+					Sign In
+				</Link>
+			</div>
+		);
+	}
+
+	return (
+		<div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-8">
+			{/* Header */}
+			<div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-6 border-b border-gray-200">
+				<div>
+					<h1 className="text-3xl font-extrabold text-gray-900 tracking-tight font-display">
+						My Added Books
+					</h1>
+					<p className="text-sm text-gray-500 mt-1">
+						{user?.name ? `${user.name}'s Collection` : "Your personal collection"} ({books.length} {books.length === 1 ? "book" : "books"})
+					</p>
+				</div>
+
+				<div className="flex items-center gap-3">
+					{books.length > 0 && (
+						<div className="inline-flex bg-gray-100 p-1 rounded-2xl border border-gray-200 shadow-inner">
+							<button
+								type="button"
+								onClick={() => setShowType("card")}
+								className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold transition-all ${
+									showType === "card"
+										? "bg-white text-sky-700 shadow-sm"
+										: "text-gray-600 hover:text-gray-900"
+								}`}
+								title="Grid View"
+							>
+								<BsGrid className="text-sm" />
+								<span>Cards</span>
+							</button>
+							<button
+								type="button"
+								onClick={() => setShowType("table")}
+								className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold transition-all ${
+									showType === "table"
+										? "bg-white text-sky-700 shadow-sm"
+										: "text-gray-600 hover:text-gray-900"
+								}`}
+								title="Table View"
+							>
+								<BsTable className="text-sm" />
+								<span>Table</span>
+							</button>
+						</div>
+					)}
+
+					<button
+						type="button"
+						onClick={() => navigate("/books/create")}
+						className="inline-flex items-center gap-2 bg-sky-600 hover:bg-sky-700 text-white px-4 py-2.5 rounded-2xl text-sm font-bold shadow-md hover:shadow-lg transition-all"
+					>
+						<MdOutlineAddBox className="text-xl" />
+						<span>Add Book</span>
+					</button>
 				</div>
 			</div>
-			<div>
-				{books.length === 0 ? (
-					<p>There are no books yet.</p>
-				) : (
-					<div className="p-4">
-						<BooksCard books={books} />
-					</div>
-					// <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
-					// 	{/* {books.map((book) => (
-					// 		<div key={book._id} className="border p-4 rounded-lg shadow">
-					// 			<h2 className="text-xl font-bold">{book.title}</h2>
-					// 			<p>Author: {book.author}</p>
-					// 			<p>Year: {book.publishYear}</p>
-					// 			<p>{book.description}</p> */}
-					// 	{/* <Link to={`/books/details/${book._id}`} className="text-blue-500">
-					// 				View Details
-					// 			</Link> */}
-					// 	{/* <div className="flex gap-x-4 mt-2">
-					// 				<BookModalOpener book={book} />
-					// 				<Link to={`/books/edit/${book._id}`}>
-					// 					<AiOutlineEdit className="text-2xl text-yellow-600" />
-					// 				</Link>
-					// 				<Link to={`/books/delete/${book._id}`}>
-					// 					<MdOutlineDelete className="text-2xl text-red-600" />
-					// 				</Link>
-					// 			</div>
-					// 		</div>
-					// 	))} */}
 
-					// </div>
+			{/* Main Content */}
+			<div>
+				{loading ? (
+					<Spinner />
+				) : books.length === 0 ? (
+					<div className="text-center py-16 bg-white rounded-3xl border border-gray-100 shadow-sm">
+						<div className="w-16 h-16 bg-amber-50 text-amber-500 rounded-2xl flex items-center justify-center mx-auto mb-4 text-3xl">
+							📖
+						</div>
+						<h3 className="text-lg font-bold text-gray-800 mb-1">
+							No books in your collection yet
+						</h3>
+						<p className="text-sm text-gray-500 max-w-sm mx-auto mb-6">
+							You haven't posted any books yet. Add your first book to share it with everyone and enable 2-page reading!
+						</p>
+						<button
+							type="button"
+							onClick={() => navigate("/books/create")}
+							className="inline-flex items-center gap-2 bg-sky-600 hover:bg-sky-700 text-white px-5 py-2.5 rounded-2xl text-sm font-bold shadow-sm transition-all"
+						>
+							<MdOutlineAddBox className="text-lg" />
+							<span>Add Your First Book</span>
+						</button>
+					</div>
+				) : showType === "table" ? (
+					<BooksTable
+						books={books}
+						onBookUpdated={handleBookUpdated}
+					/>
+				) : (
+					<BooksCard
+						books={books}
+						onBookUpdated={handleBookUpdated}
+					/>
 				)}
 			</div>
 		</div>

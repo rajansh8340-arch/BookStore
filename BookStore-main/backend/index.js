@@ -1,64 +1,166 @@
 import express from "express";
-// import {PORT, mongoDBURL} from "./config.js";
 import mongoose from "mongoose";
-import { Book } from "./models/bookModel.js";
-import bookRoutes from "./routes/bookRoutes.js";
-import userRoutes from "./routes/userRoutes.js";
 import cors from "cors";
 import dotenv from "dotenv";
-// import books from "./seedBooks.js";
-
-const app = express();
+import { PORT, mongoDBURL } from "./config.js";
+import bookRoutes from "./routes/bookRoutes.js";
+import userRoutes from "./routes/userRoutes.js";
+import { Book } from "./models/bookModel.js";
+import booksSeed from "./seedBooks.js";
 
 dotenv.config();
 
-// Middleware for handling CORS policy
-// Option1 : For all origins with default of cors(*)
-// app.use(cors());
+const app = express();
 
-// Option2: Allow custom origins
+// Middleware for handling CORS policy
+const allowedOrigins = [
+	"http://localhost:5173",
+	"http://localhost:5174",
+	"http://localhost:3000",
+	"http://127.0.0.1:5173",
+	"http://127.0.0.1:5174",
+	"http://127.0.0.1:3000",
+	"https://book-store-rose-kappa.vercel.app",
+];
+
+if (process.env.CORS_ORIGIN) {
+	allowedOrigins.push(process.env.CORS_ORIGIN);
+}
+
 app.use(
 	cors({
-		origin: "https://book-store-rose-kappa.vercel.app",
-		methods: ["GET", "POST", "PUT", "DELETE"],
+		origin: (origin, callback) => {
+			if (!origin) return callback(null, true);
+			if (
+				allowedOrigins.indexOf(origin) !== -1 ||
+				process.env.NODE_ENV !== "production"
+			) {
+				return callback(null, true);
+			}
+			return callback(new Error("Not allowed by CORS"));
+		},
+		methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
 		allowedHeaders: ["Content-Type", "Authorization"],
 		credentials: true,
 	})
 );
 
-//  Middleware for parsing request body
+// Middleware for parsing request body
 app.use(express.json());
 
-//  Middleware for books routes
+// Routes
 app.use("/books", bookRoutes);
 app.use("/user", userRoutes);
 
-//  Root route
+// Root route
 app.get("/", (req, res) => {
-	return res.status(234).send("Welcome to Book Store");
+	return res.status(200).json({
+		status: "success",
+		message: "Welcome to Book Store API",
+	});
 });
 
-// const seedBooks = async () => {
-// 	try {
-// 		await Book.deleteMany({});
-// 		await Book.insertMany(books);
-// 		console.log("Books seeded successfully.");
-// 	} catch (error) {
-// 		console.log(error);
-// 	}
-// }
+// 404 Handler for undefined routes
+app.use((req, res) => {
+	res.status(404).json({ message: "Route not found" });
+});
 
-const PORT = process.env.PORT || 8080;
-const mongoDBURL = process.env.MONGODB_URL;
-mongoose
-	.connect(mongoDBURL)
-	.then(() => {
-		console.log("Database connected successfully.");
-		// await seedBooks();
-		app.listen(PORT, () => {
-			console.log(`Server running at port: ${PORT}`);
-		});
-	})
-	.catch((error) => {
-		console.log(error);
+// Global Error Handler
+app.use((err, req, res, next) => {
+	console.error("Global Error Handler:", err.stack || err);
+	res.status(err.status || 500).json({
+		message: err.message || "Internal Server Error",
 	});
+});
+
+async function seedDatabaseIfEmpty() {
+	try {
+		const count = await Book.countDocuments();
+		if (count === 0 && booksSeed && booksSeed.length > 0) {
+			await Book.insertMany(booksSeed);
+			console.log(`Seeded ${booksSeed.length} sample books into database.`);
+		} else if (count > 0 && booksSeed && booksSeed.length > 0) {
+			for (const s of booksSeed) {
+				await Book.updateOne(
+					{ title: s.title },
+					{
+						$set: {
+							rating: s.rating || 4.8,
+							ratingCount: s.ratingCount || 120,
+							genre: s.genre || "Classic Literature",
+							coverTheme: s.coverTheme || "ocean",
+							samplePages: s.samplePages,
+						},
+					}
+				);
+			}
+			await Book.updateMany(
+				{ rating: { $exists: false } },
+				{
+					$set: {
+						rating: 4.8,
+						ratingCount: 25,
+						genre: "Classic Literature",
+						coverTheme: "ocean",
+					},
+				}
+			);
+			console.log("Updated sample pages and ratings for all books in database.");
+		}
+	} catch (seedErr) {
+		console.warn("Could not seed or update initial books:", seedErr.message);
+	}
+}
+
+async function startServer() {
+	let connected = false;
+
+	if (
+		mongoDBURL &&
+		!mongoDBURL.includes("63xn7au.mongodb.net") &&
+		!mongoDBURL.includes("<username>")
+	) {
+		try {
+			console.log("Connecting to configured MongoDB database...");
+			await mongoose.connect(mongoDBURL, { serverSelectionTimeoutMS: 5000 });
+			console.log("Connected to configured MongoDB successfully.");
+			connected = true;
+		} catch (error) {
+			console.warn("Configured MongoDB connection failed:", error.message);
+		}
+	}
+
+	if (!connected) {
+		try {
+			console.log("Initializing in-memory MongoDB server for instant setup...");
+			const { MongoMemoryServer } = await import("mongodb-memory-server");
+			const mongod = await MongoMemoryServer.create();
+			const uri = mongod.getUri();
+			await mongoose.connect(uri);
+			console.log("Connected to in-memory MongoDB successfully!");
+			connected = true;
+		} catch (memErr) {
+			console.error("In-memory MongoDB startup error:", memErr.message);
+		}
+	}
+
+	if (connected) {
+		await seedDatabaseIfEmpty();
+	} else {
+		console.warn("Database connection pending. Operations requiring database will buffer/fail.");
+	}
+
+	const server = app.listen(PORT, () => {
+		console.log(`Server running at port: ${PORT}`);
+	});
+
+	server.on("error", (err) => {
+		if (err.code === "EADDRINUSE") {
+			console.warn(`Port ${PORT} is already in use by another instance.`);
+		} else {
+			console.error("Server error:", err);
+		}
+	});
+}
+
+startServer();

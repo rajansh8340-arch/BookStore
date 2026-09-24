@@ -1,10 +1,9 @@
-import React from 'react'
-
-
 const Spinner = () => {
-  return (
-    <div className='animate-ping h-16 w-16 m-8 bg-sky-600'></div>
-  )
-}
+	return (
+		<div className="flex justify-center items-center p-8">
+			<div className="w-12 h-12 border-4 border-sky-200 border-t-sky-600 rounded-full animate-spin"></div>
+		</div>
+	);
+};
 
-export default Spinner
+export default Spinner;

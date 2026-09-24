@@ -1,3 +1,71 @@
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+@layer base {
+	body {
+		font-family: "Outfit", sans-serif;
+	}
+}
+
+/* Ornate Drop Cap for Book Opening Page */
+.drop-cap::first-letter {
+	float: left;
+	font-family: "Cinzel", "Playfair Display", serif;
+	font-size: 3.8rem;
+	line-height: 0.8;
+	padding-top: 4px;
+	padding-right: 10px;
+	padding-bottom: 2px;
+	font-weight: 700;
+	color: currentColor;
+	opacity: 0.92;
+}
+
+/* Custom Smooth Scrollbar */
+::-webkit-scrollbar {
+	width: 8px;
+	height: 8px;
+}
+
+::-webkit-scrollbar-track {
+	background: #f1f5f9;
+}
+
+::-webkit-scrollbar-thumb {
+	background: #cbd5e1;
+	border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+	background: #94a3b8;
+}
+
+/* Realistic Book Central Spine Divider */
+.book-spine-divider {
+	position: absolute;
+	top: 0;
+	bottom: 0;
+	left: 50%;
+	width: 28px;
+	transform: translateX(-50%);
+	background: linear-gradient(
+		to right,
+		rgba(0, 0, 0, 0.08) 0%,
+		rgba(0, 0, 0, 0.18) 40%,
+		rgba(0, 0, 0, 0.28) 50%,
+		rgba(0, 0, 0, 0.18) 60%,
+		rgba(0, 0, 0, 0.08) 100%
+	);
+	pointer-events: none;
+	z-index: 10;
+}
+
+/* Page Curvature Shading */
+.page-shadow-left {
+	background: linear-gradient(to right, rgba(0,0,0,0.03) 0%, rgba(0,0,0,0) 80%, rgba(0,0,0,0.12) 100%);
+}
+
+.page-shadow-right {
+	background: linear-gradient(to left, rgba(0,0,0,0.03) 0%, rgba(0,0,0,0) 80%, rgba(0,0,0,0.12) 100%);
+}

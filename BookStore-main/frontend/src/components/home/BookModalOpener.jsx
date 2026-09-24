@@ -7,10 +7,15 @@ const BookModalOpener = ({ book }) => {
 
 	return (
 		<>
-			<BiShow
-				className="text-3xl text-blue-800 hover:text-black cursor-pointer"
+			<button
+				type="button"
 				onClick={() => setShowModal(true)}
-			/>
+				className="p-1 text-sky-600 hover:text-sky-800 hover:bg-sky-50 rounded-lg transition-colors"
+				title="Quick Preview"
+				aria-label="Quick Preview"
+			>
+				<BiShow className="text-2xl" />
+			</button>
 			{showModal && (
 				<BookModal book={book} onClose={() => setShowModal(false)} />
 			)}
@@ -19,3 +24,4 @@ const BookModalOpener = ({ book }) => {
 };
 
 export default BookModalOpener;
+

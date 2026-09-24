@@ -1,4 +1,3 @@
-import React from "react";
 import { Routes, Route } from "react-router-dom";
 import Navbar from "./components/Navbar";
 import Home from "./pages/Home";
@@ -14,7 +13,7 @@ import MyBooks from "./pages/MyBooks";
 
 const App = () => {
 	return (
-		<div className="min-h-screen flex flex-col">
+		<div className="min-h-screen flex flex-col bg-slate-50 text-slate-800">
 			<AuthProvider>
 				<Navbar />
 				<main className="flex-grow">
@@ -28,6 +27,8 @@ const App = () => {
 						<Route path="/books/edit/:id" element={<EditBook />} />
 						<Route path="/books/delete/:id" element={<DeleteBook />} />
 						<Route path="/mybooks" element={<MyBooks />} />
+						{/* Catch all unmatched routes and redirect to Home */}
+						<Route path="*" element={<Home />} />
 					</Routes>
 				</main>
 			</AuthProvider>
@@ -36,3 +37,4 @@ const App = () => {
 };
 
 export default App;
+

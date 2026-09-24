@@ -1,119 +1,442 @@
-import React, { useState, useEffect } from "react";
+import { useState, useEffect } from "react";
 import BackButton from "../components/BackButton";
 import Spinner from "../components/Spinner";
-import axios from "axios";
+import apiClient from "../api/apiClient";
 import { useNavigate, useParams } from "react-router-dom";
 import { useSnackbar } from "notistack";
+import { BiBook, BiUser, BiCalendar, BiDetail, BiCategory } from "react-icons/bi";
+import { BsChevronDown, BsChevronUp } from "react-icons/bs";
+import RatingStars from "../components/RatingStars";
+
+const GENRES = [
+	"Classic Fiction",
+	"Dystopian Sci-Fi",
+	"Fantasy",
+	"Romance & Classic",
+	"Adventure & Epic",
+	"Gothic Romance",
+	"Psychological Classic",
+	"Epic Poetry",
+	"Mystery & Thriller",
+	"Philosophy & Non-Fiction",
+	"Biography & History",
+];
+
+const THEMES = [
+	{ id: "ocean", name: "Ocean Blue", bg: "bg-sky-600" },
+	{ id: "amber", name: "Warm Amber", bg: "bg-amber-600" },
+	{ id: "emerald", name: "Emerald Teal", bg: "bg-emerald-600" },
+	{ id: "rose", name: "Rose Crimson", bg: "bg-rose-600" },
+	{ id: "purple", name: "Royal Purple", bg: "bg-purple-600" },
+	{ id: "gold", name: "Classic Gold", bg: "bg-yellow-600" },
+	{ id: "navy", name: "Midnight Navy", bg: "bg-blue-900" },
+	{ id: "slate", name: "Graphite Slate", bg: "bg-slate-700" },
+];
 
 const EditBook = () => {
 	const [title, setTitle] = useState("");
 	const [author, setAuthor] = useState("");
 	const [publishYear, setPublishYear] = useState("");
 	const [description, setDescription] = useState("");
-	const [loading, setLoading] = useState(false);
+	const [genre, setGenre] = useState("Classic Fiction");
+	const [rating, setRating] = useState(4.5);
+	const [coverTheme, setCoverTheme] = useState("ocean");
+
+	// 2-page sample excerpt
+	const [showCustomPages, setShowCustomPages] = useState(false);
+	const [page1Chapter, setPage1Chapter] = useState("");
+	const [page1Text, setPage1Text] = useState("");
+	const [page2Chapter, setPage2Chapter] = useState("");
+	const [page2Text, setPage2Text] = useState("");
+
+	const [loading, setLoading] = useState(true);
+	const [saving, setSaving] = useState(false);
+
 	const navigate = useNavigate();
 	const { id } = useParams();
 	const { enqueueSnackbar } = useSnackbar();
 
 	useEffect(() => {
+		let isMounted = true;
 		setLoading(true);
-		axios
-			.get(`https://bookstore-csp3.onrender.com/books/${id}`)
+
+		apiClient
+			.get(`/books/${id}`)
 			.then((response) => {
-				setAuthor(response.data.author);
-				setPublishYear(response.data.publishYear);
-				setTitle(response.data.title);
-				setDescription(response.data.description);
-				setLoading(false);
+				if (isMounted) {
+					const book = response.data;
+					if (!book) {
+						enqueueSnackbar("Book not found.", { variant: "error" });
+						navigate("/");
+						return;
+					}
+					setTitle(book.title || "");
+					setAuthor(book.author || "");
+					setPublishYear(String(book.publishYear || ""));
+					setDescription(book.description || "");
+					setGenre(book.genre || "Classic Fiction");
+					setRating(book.rating || 4.5);
+					setCoverTheme(book.coverTheme || "ocean");
+
+					if (book.samplePages) {
+						setPage1Chapter(book.samplePages.page1?.chapterTitle || "");
+						setPage1Text(
+							(book.samplePages.page1?.paragraphs || []).join("\n\n")
+						);
+						setPage2Chapter(book.samplePages.page2?.chapterTitle || "");
+						setPage2Text(
+							(book.samplePages.page2?.paragraphs || []).join("\n\n")
+						);
+					}
+					setLoading(false);
+				}
 			})
 			.catch((error) => {
-				setLoading(false);
-				alert("An error happened. Please check console");
-				console.log(error);
+				if (isMounted) {
+					console.error("Fetch book for edit error:", error);
+					enqueueSnackbar(
+						error.userMessage || "Failed to fetch book details.",
+						{ variant: "error" }
+					);
+					setLoading(false);
+				}
 			});
-	}, []);
 
-	const handleEditBook = () => {
-		const data = {
-			title,
-			author,
-			publishYear,
-			description,
+		return () => {
+			isMounted = false;
 		};
-		setLoading(true);
-		axios
-			.put(`https://bookstore-csp3.onrender.com/books/${id}`, data)
+	}, [id, enqueueSnackbar, navigate]);
+
+	const handleEditBook = (e) => {
+		if (e) e.preventDefault();
+
+		if (!title.trim() || !author.trim() || !publishYear || !description.trim()) {
+			enqueueSnackbar("Please fill in all required fields.", {
+				variant: "warning",
+			});
+			return;
+		}
+
+		const year = Number(publishYear);
+		if (isNaN(year) || year < -3000 || year > new Date().getFullYear() + 10) {
+			enqueueSnackbar("Please enter a valid publication year.", {
+				variant: "warning",
+			});
+			return;
+		}
+
+		let customSamplePages = undefined;
+		if (page1Text.trim() || page2Text.trim()) {
+			customSamplePages = {
+				page1: {
+					chapterTitle: page1Chapter.trim() || `Chapter 1: The Beginning`,
+					paragraphs: page1Text
+						.split("\n\n")
+						.map((p) => p.trim())
+						.filter(Boolean),
+				},
+				page2: {
+					chapterTitle: page2Chapter.trim() || "Chapter 1: Continuation",
+					paragraphs: page2Text
+						.split("\n\n")
+						.map((p) => p.trim())
+						.filter(Boolean),
+				},
+			};
+		}
+
+		const data = {
+			title: title.trim(),
+			author: author.trim(),
+			publishYear: year,
+			description: description.trim(),
+			genre: genre.trim(),
+			rating: Number(rating) || 4.5,
+			coverTheme,
+			samplePages: customSamplePages,
+		};
+
+		setSaving(true);
+
+		apiClient
+			.put(`/books/${id}`, data)
 			.then(() => {
-				setLoading(false);
-				enqueueSnackbar("Book Edited successfully", { variant: "success" });
+				setSaving(false);
+				enqueueSnackbar("Book updated successfully!", { variant: "success" });
 				navigate("/");
 			})
 			.catch((error) => {
-				setLoading(false);
-				enqueueSnackbar("Error", { variant: "error" });
-				console.log(error);
+				setSaving(false);
+				console.error("Update book error:", error);
+				enqueueSnackbar(
+					error.userMessage || "Failed to update book. Please try again.",
+					{ variant: "error" }
+				);
 			});
 	};
 
 	return (
-		<div className="p-4 bg-gray-100 min-h-screen">
-			<BackButton />
-			<h1 className="text-2xl font-semibold mb-4 text-center">Edit Book</h1>
-			{loading ? (
-				<Spinner />
-			) : (
-				<div className="flex flex-col max-w-md mx-auto bg-white shadow-md rounded-lg p-6 border border-sky-400">
-					<div className="mb-4">
-						<label className="block text-lg font-medium text-gray-700 mb-1">
-							Title
-						</label>
-						<input
-							type="text"
-							value={title}
-							onChange={(e) => setTitle(e.target.value)}
-							className="border border-gray-300 rounded-md px-4 py-2 w-full"
-						/>
-					</div>
-					<div className="mb-4">
-						<label className="block text-lg font-medium text-gray-700 mb-1">
-							Author
-						</label>
-						<input
-							type="text"
-							value={author}
-							onChange={(e) => setAuthor(e.target.value)}
-							className="border border-gray-300 rounded-md px-4 py-2 w-full"
-						/>
-					</div>
-					<div className="mb-4">
-						<label className="block text-lg font-medium text-gray-700 mb-1">
-							Publish Year
-						</label>
-						<input
-							type="number"
-							value={publishYear}
-							onChange={(e) => setPublishYear(e.target.value)}
-							className="border border-gray-300 rounded-md px-4 py-2 w-full"
-						/>
-					</div>
-					<div className="mb-4">
-						<label className="block text-lg font-medium text-gray-700 mb-1">
-							Description
-						</label>
-						<textarea
-							value={description}
-							onChange={(e) => setDescription(e.target.value)}
-							className="border border-gray-300 rounded-md px-4 py-2 w-full"
-						/>
-					</div>
-					<button
-						className="w-full bg-sky-300 text-white py-2 rounded-lg hover:bg-sky-400 transition-colors"
-						onClick={handleEditBook}
-					>
-						Save
-					</button>
+		<div className="max-w-3xl mx-auto px-4 sm:px-6 py-8">
+			<BackButton destination="/" />
+
+			<div className="bg-white rounded-3xl shadow-xl border border-gray-100 p-6 sm:p-10">
+				<div className="text-center mb-8">
+					<h1 className="text-3xl font-extrabold text-gray-900 tracking-tight font-display">
+						Edit Book
+					</h1>
+					<p className="text-sm text-gray-500 mt-2">
+						Update the information, rating, and 2-page reader sample
+					</p>
 				</div>
-			)}
+
+				{loading ? (
+					<Spinner />
+				) : (
+					<form onSubmit={handleEditBook} className="space-y-6">
+						{/* Title */}
+						<div>
+							<label
+								htmlFor="title"
+								className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-1.5"
+							>
+								Book Title *
+							</label>
+							<div className="relative">
+								<BiBook className="absolute left-3.5 top-1/2 -translate-y-1/2 text-gray-400 text-lg" />
+								<input
+									id="title"
+									type="text"
+									value={title}
+									onChange={(e) => setTitle(e.target.value)}
+									placeholder="e.g. The Great Gatsby"
+									required
+									className="w-full pl-10 pr-4 py-2.5 text-sm border border-gray-300 rounded-2xl focus:outline-none focus:ring-2 focus:ring-sky-500 focus:border-transparent transition-all"
+								/>
+							</div>
+						</div>
+
+						{/* Author & Year */}
+						<div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+							<div>
+								<label
+									htmlFor="author"
+									className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-1.5"
+								>
+									Author *
+								</label>
+								<div className="relative">
+									<BiUser className="absolute left-3.5 top-1/2 -translate-y-1/2 text-gray-400 text-lg" />
+									<input
+										id="author"
+										type="text"
+										value={author}
+										onChange={(e) => setAuthor(e.target.value)}
+										placeholder="e.g. F. Scott Fitzgerald"
+										required
+										className="w-full pl-10 pr-4 py-2.5 text-sm border border-gray-300 rounded-2xl focus:outline-none focus:ring-2 focus:ring-sky-500 focus:border-transparent transition-all"
+									/>
+								</div>
+							</div>
+
+							<div>
+								<label
+									htmlFor="publishYear"
+									className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-1.5"
+								>
+									Publication Year *
+								</label>
+								<div className="relative">
+									<BiCalendar className="absolute left-3.5 top-1/2 -translate-y-1/2 text-gray-400 text-lg" />
+									<input
+										id="publishYear"
+										type="number"
+										value={publishYear}
+										onChange={(e) => setPublishYear(e.target.value)}
+										placeholder="e.g. 1925"
+										required
+										className="w-full pl-10 pr-4 py-2.5 text-sm border border-gray-300 rounded-2xl focus:outline-none focus:ring-2 focus:ring-sky-500 focus:border-transparent transition-all"
+									/>
+								</div>
+							</div>
+						</div>
+
+						{/* Genre & Rating */}
+						<div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+							<div>
+								<label
+									htmlFor="genre"
+									className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-1.5"
+								>
+									Genre Category
+								</label>
+								<div className="relative">
+									<BiCategory className="absolute left-3.5 top-1/2 -translate-y-1/2 text-gray-400 text-lg" />
+									<select
+										id="genre"
+										value={genre}
+										onChange={(e) => setGenre(e.target.value)}
+										className="w-full pl-10 pr-4 py-2.5 text-sm border border-gray-300 rounded-2xl focus:outline-none focus:ring-2 focus:ring-sky-500 bg-white cursor-pointer"
+									>
+										{GENRES.map((g) => (
+											<option key={g} value={g}>
+												{g}
+											</option>
+										))}
+									</select>
+								</div>
+							</div>
+
+							<div>
+								<label className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-1.5">
+									Rating Score
+								</label>
+								<div className="flex items-center gap-3 p-2 bg-gray-50 rounded-2xl border border-gray-200">
+									<RatingStars
+										rating={rating}
+										interactive={true}
+										onRate={(r) => setRating(r)}
+										size="md"
+									/>
+									<span className="text-xs font-bold text-gray-700">
+										{rating} / 5.0 ⭐
+									</span>
+								</div>
+							</div>
+						</div>
+
+						{/* Cover Theme */}
+						<div>
+							<label className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-2">
+								Card Theme Color
+							</label>
+							<div className="flex flex-wrap gap-2">
+								{THEMES.map((t) => (
+									<button
+										key={t.id}
+										type="button"
+										onClick={() => setCoverTheme(t.id)}
+										className={`px-3 py-1.5 rounded-xl text-xs font-bold text-white transition-all flex items-center gap-1.5 ${
+											t.bg
+										} ${
+											coverTheme === t.id
+												? "ring-2 ring-offset-2 ring-slate-800 scale-105"
+												: "opacity-80 hover:opacity-100"
+										}`}
+									>
+										<span>{t.name}</span>
+										{coverTheme === t.id && <span>✓</span>}
+									</button>
+								))}
+							</div>
+						</div>
+
+						{/* Description */}
+						<div>
+							<label
+								htmlFor="description"
+								className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-1.5"
+							>
+								Description / Synopsis *
+							</label>
+							<div className="relative">
+								<BiDetail className="absolute left-3.5 top-3 text-gray-400 text-lg" />
+								<textarea
+									id="description"
+									value={description}
+									onChange={(e) => setDescription(e.target.value)}
+									placeholder="Write an overview of the plot or key themes..."
+									rows="3"
+									required
+									className="w-full pl-10 pr-4 py-2.5 text-sm border border-gray-300 rounded-2xl focus:outline-none focus:ring-2 focus:ring-sky-500 focus:border-transparent transition-all resize-y"
+								/>
+							</div>
+						</div>
+
+						{/* Accordion: 2-Page Excerpt */}
+						<div className="border border-sky-100 bg-sky-50/50 rounded-2xl p-4">
+							<button
+								type="button"
+								onClick={() => setShowCustomPages(!showCustomPages)}
+								className="w-full flex items-center justify-between text-xs font-bold text-sky-900 uppercase tracking-wider text-left"
+							>
+								<div className="flex items-center gap-2">
+									<span>📖 2-Page Reader Excerpt Configuration</span>
+								</div>
+								{showCustomPages ? <BsChevronUp /> : <BsChevronDown />}
+							</button>
+
+							{showCustomPages && (
+								<div className="mt-4 space-y-4 pt-4 border-t border-sky-200/60">
+									<div className="space-y-2">
+										<label className="block text-xs font-bold text-gray-700">
+											Page 1 Chapter Title & Paragraphs
+										</label>
+										<input
+											type="text"
+											value={page1Chapter}
+											onChange={(e) => setPage1Chapter(e.target.value)}
+											placeholder="e.g. Chapter 1: The First Step"
+											className="w-full px-3 py-2 text-xs border border-gray-300 rounded-xl bg-white"
+										/>
+										<textarea
+											value={page1Text}
+											onChange={(e) => setPage1Text(e.target.value)}
+											placeholder="Paragraphs for left page..."
+											rows="3"
+											className="w-full px-3 py-2 text-xs border border-gray-300 rounded-xl bg-white"
+										/>
+									</div>
+
+									<div className="space-y-2">
+										<label className="block text-xs font-bold text-gray-700">
+											Page 2 Chapter Title & Paragraphs
+										</label>
+										<input
+											type="text"
+											value={page2Chapter}
+											onChange={(e) => setPage2Chapter(e.target.value)}
+											placeholder="e.g. Chapter 1: Continuation"
+											className="w-full px-3 py-2 text-xs border border-gray-300 rounded-xl bg-white"
+										/>
+										<textarea
+											value={page2Text}
+											onChange={(e) => setPage2Text(e.target.value)}
+											placeholder="Paragraphs for right page..."
+											rows="3"
+											className="w-full px-3 py-2 text-xs border border-gray-300 rounded-xl bg-white"
+										/>
+									</div>
+								</div>
+							)}
+						</div>
+
+						{/* Action Buttons */}
+						<div className="pt-4 flex gap-4">
+							<button
+								type="button"
+								onClick={() => navigate(-1)}
+								className="w-1/3 bg-gray-100 hover:bg-gray-200 text-gray-700 font-bold py-3 px-4 rounded-2xl transition-all text-sm"
+							>
+								Cancel
+							</button>
+							<button
+								type="submit"
+								disabled={saving}
+								className="w-2/3 bg-sky-600 hover:bg-sky-700 disabled:bg-sky-400 text-white font-bold py-3 px-4 rounded-2xl shadow-md hover:shadow-lg transition-all text-sm flex items-center justify-center gap-2"
+							>
+								{saving ? (
+									<>
+										<div className="w-4 h-4 border-2 border-white/40 border-t-white rounded-full animate-spin"></div>
+										<span>Saving Changes...</span>
+									</>
+								) : (
+									<span>Update Book</span>
+								)}
+							</button>
+						</div>
+					</form>
+				)}
+			</div>
 		</div>
 	);
 };

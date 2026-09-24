@@ -1,0 +1,15 @@
+{
+  "name": "bookstore-root",
+  "version": "1.0.0",
+  "description": "Full-Stack BookStore Project with 2-Page Reader & Rating System",
+  "scripts": {
+    "dev": "npm --prefix BookStore-main/frontend run dev",
+    "frontend": "npm --prefix BookStore-main/frontend run dev",
+    "backend": "npm --prefix BookStore-main/backend run dev",
+    "build": "npm --prefix BookStore-main/frontend run build",
+    "start": "npm --prefix BookStore-main/backend start"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC"
+}
