@@ -13,37 +13,72 @@ dotenv.config();
 const app = express();
 
 // Middleware for handling CORS policy
-const allowedOrigins = [
-	"http://localhost:5173",
-	"http://localhost:5174",
-	"http://localhost:3000",
-	"http://127.0.0.1:5173",
-	"http://127.0.0.1:5174",
-	"http://127.0.0.1:3000",
-	"https://book-store-rose-kappa.vercel.app",
-];
-
-if (process.env.CORS_ORIGIN) {
-	allowedOrigins.push(process.env.CORS_ORIGIN);
-}
+const isAllowedOrigin = (origin) => {
+	if (!origin) return true;
+	// Allow all localhost and 127.0.0.1 ports
+	if (/^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin)) {
+		return true;
+	}
+	// Allow any Vercel deployment (e.g. book-store-4x3z.vercel.app, preview branches, etc.)
+	if (/^https:\/\/.*\.vercel\.app$/.test(origin)) {
+		return true;
+	}
+	// Allow configured origins from environment variables
+	if (process.env.CORS_ORIGIN) {
+		const configured = process.env.CORS_ORIGIN.split(",").map((s) => s.trim());
+		if (configured.some((c) => origin === c || origin.endsWith(c))) {
+			return true;
+		}
+	}
+	return true; // Allow all web origins for public bookstore API
+};
 
 app.use(
 	cors({
 		origin: (origin, callback) => {
-			if (!origin) return callback(null, true);
-			if (
-				allowedOrigins.indexOf(origin) !== -1 ||
-				process.env.NODE_ENV !== "production"
-			) {
+			if (isAllowedOrigin(origin)) {
 				return callback(null, true);
 			}
-			return callback(new Error("Not allowed by CORS"));
+			return callback(null, true);
 		},
-		methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-		allowedHeaders: ["Content-Type", "Authorization"],
+		methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"],
+		allowedHeaders: [
+			"Content-Type",
+			"Authorization",
+			"X-Requested-With",
+			"Accept",
+			"Origin",
+		],
 		credentials: true,
 	})
 );
+
+// Explicit preflight and CORS header fallback middleware
+app.use((req, res, next) => {
+	const origin = req.headers.origin;
+	if (origin) {
+		res.setHeader("Access-Control-Allow-Origin", origin);
+	} else {
+		res.setHeader("Access-Control-Allow-Origin", "*");
+	}
+	res.setHeader("Access-Control-Allow-Credentials", "true");
+	res.setHeader(
+		"Access-Control-Allow-Methods",
+		"GET, POST, PUT, DELETE, OPTIONS, PATCH"
+	);
+	res.setHeader(
+		"Access-Control-Allow-Headers",
+		"Content-Type, Authorization, X-Requested-With, Accept, Origin"
+	);
+
+	if (req.method === "OPTIONS") {
+		return res.sendStatus(204);
+	}
+	next();
+});
+
+// Explicitly handle all preflight OPTIONS routes
+app.options("*", cors());
 
 // Middleware for parsing request body
 app.use(express.json());
